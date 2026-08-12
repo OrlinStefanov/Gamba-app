@@ -35,6 +35,16 @@ def main(argv=None) -> int:
     sub.add_parser("doctor", help="check dependencies, key, screen access")
     sub.add_parser("init-config", help="write a config file with the defaults")
 
+    set_key = sub.add_parser(
+        "set-key",
+        help="store an API key in ~/.gamba/.env (prompts; never echoed)",
+    )
+    set_key.add_argument("--env-name", default=None, metavar="NAME",
+                         help="variable name to store it under "
+                              "(default: the provider's)")
+    set_key.add_argument("--path", type=Path, default=None,
+                         help="file to write (default: ~/.gamba/.env)")
+
     ask = sub.add_parser("ask", help="one-shot: screenshot, answer, print, exit")
     ask.add_argument("question", nargs="*", help="question to ask about the screen")
     ask.add_argument("--deadline", type=float, default=None,
@@ -61,6 +71,8 @@ def main(argv=None) -> int:
         path = save_config(config, args.config)
         print(f"wrote {path}")
         return 0
+    if command == "set-key":
+        return _set_key(config, args)
     if command == "doctor":
         return _doctor(config, dotenv_files)
     if command == "ask":
@@ -118,6 +130,31 @@ def _ask(config, args) -> int:
         f"{answer.input_tokens} in / {answer.output_tokens} out · ${cost:.5f}]",
         file=sys.stderr,
     )
+    return 0
+
+
+def _set_key(config, args) -> int:
+    """Store a key in a .env file without it passing through shell history."""
+    import getpass
+
+    from .config import DOTENV_PATHS, write_env_var
+
+    name = args.env_name or config.api_key_env_var
+    path = args.path or DOTENV_PATHS[1]  # ~/.gamba/.env
+
+    if sys.stdin.isatty():
+        key = getpass.getpass(f"Paste the key to store as {name} (not echoed): ")
+    else:
+        key = sys.stdin.readline()  # allows: echo "$KEY" | gamba set-key
+    key = key.strip()
+
+    if not key:
+        print("error: no key given", file=sys.stderr)
+        return 2
+
+    written = write_env_var(path, name, key)
+    print(f"stored {name} in {written} ({_mask(key)})")
+    print("Run 'python -m gamba doctor' to confirm it resolves.")
     return 0
 
 

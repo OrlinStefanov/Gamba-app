@@ -276,6 +276,43 @@ def load_dotenv_files(paths=DOTENV_PATHS) -> list:
     return loaded
 
 
+def write_env_var(path: Path, name: str, value: str) -> Path:
+    """Set `name=value` in a .env file, preserving the other entries.
+
+    The file is created (and re-set on every write) with owner-only
+    permissions, so a key does not land in a world-readable file.
+    """
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    lines = []
+    if path.is_file():
+        lines = path.read_text(encoding="utf-8").splitlines()
+
+    replacement = f"{name}={value}"
+    replaced = False
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        candidate = stripped[len("export "):].lstrip() if stripped.startswith(
+            "export ") else stripped
+        if candidate.split("=", 1)[0].strip() == name:
+            lines[index] = replacement
+            replaced = True
+            break
+    if not replaced:
+        lines.append(replacement)
+
+    # Create with 0600 from the start rather than widening then narrowing.
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        handle.write("\n".join(lines) + "\n")
+    try:
+        os.chmod(path, 0o600)  # no-op on Windows, matters everywhere else
+    except OSError:
+        pass
+    return path
+
+
 def load_config(path: Optional[Path] = None) -> Config:
     path = Path(path) if path else DEFAULT_CONFIG_PATH
     config = Config()

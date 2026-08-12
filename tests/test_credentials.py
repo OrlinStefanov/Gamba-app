@@ -10,7 +10,7 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from gamba.config import (Config, apply_provider_defaults, load_config,
-                          load_dotenv_files, save_config)
+                          load_dotenv_files, save_config, write_env_var)
 from gamba.provider import create_provider
 
 CLEAN_ENV = {"OPENAI_API_KEY": "", "ANTHROPIC_API_KEY": "", "GAMBA_API_KEY": ""}
@@ -118,6 +118,66 @@ class TestDotEnv(unittest.TestCase):
                 key, source = config.resolve_api_key()
         self.assertEqual(key, "sk-from-file")
         self.assertIn("MY_SCREEN_KEY", source)
+
+
+class TestWriteEnvVar(unittest.TestCase):
+    """`set-key` writes here: it must not clobber neighbours or widen permissions."""
+
+    def test_creates_the_file_with_owner_only_permissions(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = write_env_var(Path(tmp) / "sub" / ".env", "MY_KEY", "sk-secret")
+            self.assertEqual(path.read_text(encoding="utf-8"), "MY_KEY=sk-secret\n")
+            if os.name != "nt":
+                self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+
+    def test_replaces_an_existing_value_in_place(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / ".env"
+            path.write_text("OTHER=keep\nMY_KEY=sk-old\nTRAILING=keep\n",
+                            encoding="utf-8")
+            write_env_var(path, "MY_KEY", "sk-new")
+            self.assertEqual(
+                path.read_text(encoding="utf-8"),
+                "OTHER=keep\nMY_KEY=sk-new\nTRAILING=keep\n",
+            )
+
+    def test_appends_without_touching_other_entries(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / ".env"
+            path.write_text("# comment\nOTHER=keep\n", encoding="utf-8")
+            write_env_var(path, "MY_KEY", "sk-new")
+            self.assertEqual(
+                path.read_text(encoding="utf-8"),
+                "# comment\nOTHER=keep\nMY_KEY=sk-new\n",
+            )
+
+    def test_replaces_an_exported_line(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / ".env"
+            path.write_text("export MY_KEY=sk-old\n", encoding="utf-8")
+            write_env_var(path, "MY_KEY", "sk-new")
+            self.assertEqual(path.read_text(encoding="utf-8"), "MY_KEY=sk-new\n")
+
+    def test_does_not_match_a_similarly_named_variable(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / ".env"
+            path.write_text("MY_KEY_BACKUP=sk-other\n", encoding="utf-8")
+            write_env_var(path, "MY_KEY", "sk-new")
+            self.assertEqual(
+                path.read_text(encoding="utf-8"),
+                "MY_KEY_BACKUP=sk-other\nMY_KEY=sk-new\n",
+            )
+
+    def test_written_key_is_then_resolvable(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / ".env"
+            write_env_var(path, "MY_SCREEN_KEY", "sk-roundtrip")
+            config = Config()
+            config.model.api_key_env = "MY_SCREEN_KEY"
+            with clean_env():
+                os.environ.pop("MY_SCREEN_KEY", None)
+                load_dotenv_files([path])
+                self.assertEqual(config.resolved_api_key(), "sk-roundtrip")
 
 
 class TestCustomEndpoint(unittest.TestCase):
