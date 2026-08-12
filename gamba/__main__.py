@@ -8,7 +8,8 @@ import time
 from pathlib import Path
 
 from .config import (DEFAULT_CONFIG_PATH, PROVIDER_DEFAULTS,
-                     apply_provider_defaults, load_config, save_config)
+                     apply_provider_defaults, load_config, load_dotenv_files,
+                     save_config)
 
 
 def main(argv=None) -> int:
@@ -21,6 +22,13 @@ def main(argv=None) -> int:
     parser.add_argument("--provider", choices=sorted(PROVIDER_DEFAULTS), default=None,
                         help="override the provider, with its default model and pricing")
     parser.add_argument("--model", default=None, help="override the model id")
+    parser.add_argument("--api-key-env", default=None, metavar="NAME",
+                        help="read the key from your own environment variable "
+                             "instead of the provider default")
+    parser.add_argument("--base-url", default=None, metavar="URL",
+                        help="point at your own OpenAI-compatible endpoint")
+    parser.add_argument("--api-name", default=None, metavar="LABEL",
+                        help="what to call this endpoint in the UI")
     sub = parser.add_subparsers(dest="command")
 
     sub.add_parser("run", help="start the overlay app (default)")
@@ -35,11 +43,18 @@ def main(argv=None) -> int:
                      help="also write the screenshot that was sent to this path")
 
     args = parser.parse_args(argv)
+    dotenv_files = load_dotenv_files()
     config = load_config(args.config)
     if args.provider:
         apply_provider_defaults(config, args.provider)
     if args.model:
         config.model.model = args.model
+    if args.api_key_env:
+        config.model.api_key_env = args.api_key_env
+    if args.base_url:
+        config.model.base_url = args.base_url
+    if args.api_name:
+        config.model.api_name = args.api_name
     command = args.command or "run"
 
     if command == "init-config":
@@ -47,7 +62,7 @@ def main(argv=None) -> int:
         print(f"wrote {path}")
         return 0
     if command == "doctor":
-        return _doctor(config)
+        return _doctor(config, dotenv_files)
     if command == "ask":
         return _ask(config, args)
     return _run(config)
@@ -59,7 +74,7 @@ def _run(config) -> int:
 
     try:
         app = GambaApp(config)
-    except MissingAPIKey as exc:
+    except (MissingAPIKey, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
     app.run()
@@ -73,7 +88,7 @@ def _ask(config, args) -> int:
     question = " ".join(args.question) or config.watch.question
     try:
         provider = create_provider(config.model, config.resolved_api_key())
-    except MissingAPIKey as exc:
+    except (MissingAPIKey, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
 
@@ -106,11 +121,17 @@ def _ask(config, args) -> int:
     return 0
 
 
-def _doctor(config) -> int:
+def _doctor(config, dotenv_files=()) -> int:
     ok = True
     provider = config.model.provider.lower()
-    sdk = {"openai": "openai", "anthropic": "anthropic"}.get(provider, "openai")
-    print(f"provider: {provider} · model: {config.model.model}")
+    sdk = "anthropic" if provider == "anthropic" else "openai"
+
+    print(f"api:      {config.api_label}")
+    print(f"provider: {provider} · model: {config.model.model or '(unset)'}")
+    if config.model.base_url:
+        print(f"endpoint: {config.model.base_url}")
+    for path in dotenv_files:
+        print(f"loaded:   {path}")
 
     for module, why in (
         ("mss", "screen capture"),
@@ -126,19 +147,30 @@ def _doctor(config) -> int:
             ok = False
             print(f"  FAIL  {module:<10} ({why}): {exc}")
 
-    env_var = config.api_key_env_var
-    if config.resolved_api_key():
-        print(f"  ok    API key found ({env_var})")
+    key, source = config.resolve_api_key()
+    if key:
+        print(f"  ok    API key found via {source} ({_mask(key)})")
     else:
         ok = False
-        print(f"  FAIL  no API key (set {env_var})")
-        if provider == "openai":
+        print(f"  FAIL  no API key - looked at {source}")
+        if config.model.api_key_env:
+            from .config import DEFAULT_API_KEY_ENV_VARS
+
+            fallback = DEFAULT_API_KEY_ENV_VARS.get(provider, "OPENAI_API_KEY")
+            print(f"        You set a custom name, so only {config.model.api_key_env}")
+            print("        is consulted. Clear model.api_key_env (or drop")
+            print(f"        --api-key-env) to use {fallback} instead.")
+        elif provider == "openai":
             print("        A ChatGPT subscription is billed separately from the API;")
             print("        create a key at https://platform.openai.com/api-keys")
             print("        and make sure the organisation has credit.")
-        else:
+        elif provider == "anthropic":
             print("        A Claude Pro/Max subscription does not include API access;")
             print("        create a key at https://console.anthropic.com/settings/keys")
+
+    if provider == "custom" and not config.model.base_url:
+        ok = False
+        print("  FAIL  provider \"custom\" needs model.base_url (or --base-url)")
 
     try:
         from .capture import capture_once
@@ -151,6 +183,11 @@ def _doctor(config) -> int:
 
     print("all good" if ok else "some checks failed")
     return 0 if ok else 1
+
+
+def _mask(key: str) -> str:
+    """Show just enough of the key to tell two of them apart."""
+    return f"{key[:6]}…{key[-4:]}" if len(key) > 14 else "set"
 
 
 if __name__ == "__main__":

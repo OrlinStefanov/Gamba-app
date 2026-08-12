@@ -10,14 +10,16 @@ import base64
 import time
 from typing import Callable, Optional
 
+from .config import DEFAULT_API_KEY_ENV_VARS
 from .provider import Answer, MissingAPIKey
 
 
 class AnthropicProvider:
     def __init__(self, config, api_key: str) -> None:
         if not api_key:
+            env_var = config.api_key_env or DEFAULT_API_KEY_ENV_VARS["anthropic"]
             raise MissingAPIKey(
-                "No API key. Set ANTHROPIC_API_KEY, or put \"api_key\" in the "
+                f"No API key. Set {env_var}, or put \"api_key\" in the "
                 "model section of your Gamba config. Note that a Claude Pro or "
                 "Max subscription does not include API access - create a "
                 "pay-as-you-go key at https://console.anthropic.com/settings/keys."

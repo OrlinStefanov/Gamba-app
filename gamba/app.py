@@ -48,7 +48,8 @@ class GambaApp:
         if not self.hotkeys.start():
             self.overlay.set_status(f"hotkeys unavailable: {self.hotkeys.error}", "#ff7b72")
         else:
-            self.overlay.set_status(f"ready — {self.config.hotkeys.quick} to ask")
+            self.overlay.set_status(
+                f"{self.config.api_label} · {self.config.hotkeys.quick} to ask")
         self.overlay.set_meta(self._usage_line())
 
         self._watch_thread = threading.Thread(target=self._watch_loop,

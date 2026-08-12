@@ -10,7 +10,7 @@ import json
 import os
 from dataclasses import asdict, dataclass, field, fields, is_dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, Tuple
 
 DEFAULT_CONFIG_PATH = Path.home() / ".gamba" / "config.json"
 
@@ -61,13 +61,21 @@ class ModelConfig:
     #: OpenAI only: "auto", "low" (cheap, 512px - too lossy for small text),
     #: or "high" (best for reading dense UI text).
     image_detail: str = "auto"
-    #: Optional endpoint override (Azure, a gateway, a local proxy).
+    #: Endpoint override: Azure, a gateway, a local proxy, or your own
+    #: OpenAI-compatible API. Required when provider is "custom".
     base_url: str = ""
+    #: A label for your endpoint, shown in the UI and in `doctor`. Cosmetic -
+    #: it does not affect which URL is called.
+    api_name: str = ""
     #: USD per million tokens, used only for the running cost readout.
     input_cost_per_mtok: float = 0.20
     output_cost_per_mtok: float = 1.20
-    #: Read from OPENAI_API_KEY / ANTHROPIC_API_KEY if left empty.
+    #: The key itself. Prefer an environment variable over writing it here.
     api_key: str = ""
+    #: Name of the environment variable holding the key. Leave empty to use the
+    #: provider default (OPENAI_API_KEY / ANTHROPIC_API_KEY / GAMBA_API_KEY).
+    #: Set it when your key already lives under a name of your own choosing.
+    api_key_env: str = ""
 
 
 #: Sensible defaults per provider, applied by `--provider` on the command line.
@@ -84,12 +92,25 @@ PROVIDER_DEFAULTS = {
         "input_cost_per_mtok": 1.0,
         "output_cost_per_mtok": 5.0,
     },
+    # Any OpenAI-compatible endpoint under a name of your own. Set base_url and
+    # model yourself; pricing is unknown, so the cost readout starts at zero.
+    "custom": {
+        "model": "",
+        "reasoning_effort": "",
+        "input_cost_per_mtok": 0.0,
+        "output_cost_per_mtok": 0.0,
+    },
 }
 
-API_KEY_ENV_VARS = {
+DEFAULT_API_KEY_ENV_VARS = {
     "openai": "OPENAI_API_KEY",
     "anthropic": "ANTHROPIC_API_KEY",
+    "custom": "GAMBA_API_KEY",
 }
+
+#: Searched in order; values never overwrite a variable already in the
+#: environment, so a real env var always wins over a file.
+DOTENV_PATHS = (Path(".env"), Path.home() / ".gamba" / ".env")
 
 
 @dataclass
@@ -143,10 +164,49 @@ class Config:
 
     @property
     def api_key_env_var(self) -> str:
-        return API_KEY_ENV_VARS.get(self.model.provider.lower(), "OPENAI_API_KEY")
+        """The environment variable the key is read from - yours, or the default."""
+        return self.model.api_key_env or DEFAULT_API_KEY_ENV_VARS.get(
+            self.model.provider.lower(), "OPENAI_API_KEY"
+        )
+
+    @property
+    def api_label(self) -> str:
+        """What to call this endpoint in the UI: your name for it, or the provider."""
+        return self.model.api_name or self.model.provider
+
+    def resolve_api_key(self) -> tuple:
+        """Return (key, human-readable source). First match wins.
+
+        1. `api_key` in the config file
+        2. the environment variable named by `api_key_env` (yours)
+        3. the provider's default environment variable
+
+        `.env` files are loaded into the environment beforehand by
+        `load_dotenv_files()`, so they are picked up by steps 2 and 3 without
+        ever overriding a variable that is genuinely set in the environment.
+        """
+        if self.model.api_key:
+            return self.model.api_key, "config file (model.api_key)"
+
+        custom = self.model.api_key_env
+        if custom:
+            value = os.environ.get(custom, "")
+            if value:
+                return value, f"environment variable {custom}"
+            # A custom name is an explicit instruction: don't quietly fall back
+            # to the default variable and leave the user debugging the wrong one.
+            return "", f"environment variable {custom} (not set)"
+
+        default_var = self.api_key_env_var
+        value = os.environ.get(default_var, "")
+        return (value, f"environment variable {default_var}") if value else (
+            "", f"environment variable {default_var} (not set)")
 
     def resolved_api_key(self) -> str:
-        return self.model.api_key or os.environ.get(self.api_key_env_var, "")
+        return self.resolve_api_key()[0]
+
+    def api_key_source(self) -> str:
+        return self.resolve_api_key()[1]
 
 
 def apply_provider_defaults(config: "Config", provider: str) -> "Config":
@@ -181,6 +241,39 @@ def _merge(instance: Any, data: dict) -> Any:
         else:
             setattr(instance, key, value)
     return instance
+
+
+def load_dotenv_files(paths=DOTENV_PATHS) -> list:
+    """Load `KEY=value` lines from .env files into os.environ.
+
+    Deliberately does not overwrite variables that are already set: a real
+    environment variable should always beat a file left over from last week.
+    Returns the files that were read, for `doctor` to report.
+    """
+    loaded = []
+    for path in paths:
+        path = Path(path)
+        if not path.is_file():
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        for line in text.splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line.startswith("export "):
+                line = line[len("export "):].lstrip()
+            name, sep, value = line.partition("=")
+            if not sep:
+                continue
+            name = name.strip()
+            value = value.strip().strip('"').strip("'")
+            if name and name not in os.environ:
+                os.environ[name] = value
+        loaded.append(path)
+    return loaded
 
 
 def load_config(path: Optional[Path] = None) -> Config:

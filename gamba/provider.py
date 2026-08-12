@@ -55,9 +55,24 @@ class MissingAPIKey(RuntimeError):
 
 
 def create_provider(model_config, api_key: str):
-    """Build the provider named by `model_config.provider`."""
+    """Build the provider named by `model_config.provider`.
+
+    "custom" is any OpenAI-compatible endpoint under a name of your own: it
+    uses the same client as "openai" but requires you to supply the base URL.
+    """
     provider = (model_config.provider or "openai").lower()
-    if provider == "openai":
+    if provider in ("openai", "custom"):
+        if provider == "custom":
+            if not model_config.base_url:
+                raise ValueError(
+                    "provider \"custom\" needs model.base_url set to your API "
+                    "endpoint, e.g. \"https://my-gateway.example.com/v1\"."
+                )
+            if not model_config.model:
+                raise ValueError(
+                    "provider \"custom\" needs model.model set to the model id "
+                    "your endpoint expects."
+                )
         from .openai_provider import OpenAIProvider
 
         return OpenAIProvider(model_config, api_key)
@@ -66,5 +81,6 @@ def create_provider(model_config, api_key: str):
 
         return AnthropicProvider(model_config, api_key)
     raise ValueError(
-        f"Unknown provider {provider!r}. Use \"openai\" or \"anthropic\"."
+        f"Unknown provider {provider!r}. Use \"openai\", \"anthropic\" or "
+        "\"custom\"."
     )

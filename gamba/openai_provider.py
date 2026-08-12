@@ -16,18 +16,31 @@ import base64
 import time
 from typing import Callable, Optional
 
+from .config import DEFAULT_API_KEY_ENV_VARS
 from .provider import Answer, MissingAPIKey
+
+
+def key_env_var(config) -> str:
+    """The env var this config reads its key from - the user's name, or the default."""
+    return config.api_key_env or DEFAULT_API_KEY_ENV_VARS.get(
+        config.provider.lower(), "OPENAI_API_KEY"
+    )
 
 
 class OpenAIProvider:
     def __init__(self, config, api_key: str) -> None:
         if not api_key:
+            env_var = key_env_var(config)
+            hint = (
+                "A ChatGPT Plus/Pro subscription is billed separately from the "
+                "API - create a key at https://platform.openai.com/api-keys and "
+                "make sure the organisation has credit."
+                if config.provider.lower() == "openai"
+                else f"Set it to the key your endpoint at {config.base_url} expects."
+            )
             raise MissingAPIKey(
-                "No API key. Set OPENAI_API_KEY, or put \"api_key\" in the model "
-                "section of your Gamba config. A ChatGPT Plus/Pro subscription "
-                "is billed separately from the API - create a key at "
-                "https://platform.openai.com/api-keys and make sure the "
-                "organisation has credit."
+                f"No API key. Set {env_var}, or put \"api_key\" in the model "
+                f"section of your Gamba config. {hint}"
             )
         import openai
 
@@ -120,7 +133,7 @@ class OpenAIProvider:
         except openai.APIConnectionError:
             answer.error = "Network error - could not reach the API."
         except openai.AuthenticationError:
-            answer.error = "API key rejected (401). Check OPENAI_API_KEY."
+            answer.error = f"API key rejected (401). Check {key_env_var(self.config)}."
         except openai.PermissionDeniedError:
             answer.error = "API key lacks access to this model (403)."
         except openai.NotFoundError:

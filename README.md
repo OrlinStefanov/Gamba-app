@@ -13,10 +13,15 @@ Runs on Windows, macOS and Linux. Python 3.10+.
 Gamba talks to **OpenAI** by default and can switch to **Anthropic** with one
 flag. Both are streamed the same way and both obey the same deadline.
 
-| Provider | Default model | Price per 1M tokens | Env var |
+| Provider | Default model | Price per 1M tokens | Default env var |
 | --- | --- | --- | --- |
 | `openai` (default) | `gpt-5.6-luna` | $0.20 in / $1.20 out | `OPENAI_API_KEY` |
 | `anthropic` | `claude-haiku-4-5` | $1 in / $5 out | `ANTHROPIC_API_KEY` |
+| `custom` | you choose | you set them | `GAMBA_API_KEY` |
+
+The env var name is a default, not a requirement — see
+[Where the key comes from](#where-the-key-comes-from) to use your own name, a
+`.env` file, or your own endpoint.
 
 **Why `gpt-5.6-luna`:** it is the fast, low-cost tier of the GPT-5.6 family, it
 accepts image input, and — the part that matters for a 4-second budget — it
@@ -61,6 +66,82 @@ To run against Anthropic instead, export `ANTHROPIC_API_KEY` and either pass
 python -m gamba --provider anthropic          # switches model and pricing too
 python -m gamba --model gpt-5.6-terra          # keep the provider, change model
 ```
+
+### Where the key comes from
+
+Checked in this order, first match wins:
+
+1. **`model.api_key` in the config file** — simplest, but plain text on disk.
+2. **Your own environment variable**, named by `model.api_key_env` (or
+   `--api-key-env NAME`). Use this when the key already lives under a name of
+   your choosing.
+3. **The provider's default variable** — `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`,
+   or `GAMBA_API_KEY` for a custom endpoint.
+
+A **`.env` file** in the current directory or at `~/.gamba/.env` is loaded
+before any of that, so it can supply any of those variables:
+
+```sh
+# .env  (copy .env.example and fill it in)
+MY_SCREEN_KEY=sk-proj-...
+```
+
+```sh
+python -m gamba --api-key-env MY_SCREEN_KEY
+```
+
+A `.env` file never overwrites a variable that is genuinely set in your shell,
+so a real environment variable always wins over a stale file. `.env` is in
+`.gitignore`.
+
+One deliberate behaviour: **if you name a custom variable and it isn't set, the
+app does not silently fall back to the default one.** You asked for that name,
+so that name is what it reports on — otherwise you'd be debugging the wrong
+variable. `doctor` shows exactly which source won:
+
+```
+$ python -m gamba doctor
+api:      openai
+provider: openai · model: gpt-5.6-luna
+loaded:   .env
+  ok    API key found via environment variable MY_SCREEN_KEY (sk-pro…7890)
+```
+
+> The name you give a key in the OpenAI console is only a label for you. It
+> never goes into the app — only the `sk-proj-...` secret does.
+
+### Using your own API endpoint
+
+To point at an OpenAI-compatible gateway, proxy, self-hosted model or Azure
+deployment, use the `custom` provider. It needs a base URL and a model id;
+`api_name` is just what it gets called in the overlay and in `doctor`:
+
+```sh
+python -m gamba --provider custom \
+  --base-url https://my-gateway.example.com/v1 \
+  --model my-vision-model \
+  --api-name "Work gateway" \
+  --api-key-env MY_GATEWAY_KEY
+```
+
+Or in the config file:
+
+```jsonc
+"model": {
+  "provider": "custom",
+  "api_name": "Work gateway",
+  "base_url": "https://my-gateway.example.com/v1",
+  "model": "my-vision-model",
+  "api_key_env": "MY_GATEWAY_KEY",
+  "reasoning_effort": "",        // most third-party endpoints reject this
+  "input_cost_per_mtok": 0.0,    // set these if you want the cost readout
+  "output_cost_per_mtok": 0.0
+}
+```
+
+The endpoint must accept OpenAI Chat Completions with image content parts.
+`base_url` also works with `openai` and `anthropic` if you just want to route
+the official APIs through a proxy.
 
 The launcher creates a virtualenv and installs dependencies on first run. To do
 it by hand:
