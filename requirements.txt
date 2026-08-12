@@ -1,0 +1,8 @@
+# Provider SDKs. Only the one named by model.provider is imported at runtime;
+# both are installed so switching with --provider needs no reinstall.
+openai>=1.60
+anthropic>=0.40
+
+mss>=9.0
+pillow>=10.0
+pynput>=1.7
