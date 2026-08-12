@@ -11,11 +11,11 @@ if not exist ".venv" (
   ".venv\Scripts\python.exe" -m pip install -r requirements.txt || goto :fail
 )
 
-if "%ANTHROPIC_API_KEY%"=="" (
+if "%OPENAI_API_KEY%"=="" (
   echo.
-  echo ANTHROPIC_API_KEY is not set.
-  echo Get a key at https://console.anthropic.com/settings/keys then run:
-  echo     setx ANTHROPIC_API_KEY sk-ant-...
+  echo OPENAI_API_KEY is not set.
+  echo Get a key at https://platform.openai.com/api-keys then run:
+  echo     setx OPENAI_API_KEY sk-proj-...
   echo and open a new terminal.
   echo.
 )

@@ -7,7 +7,8 @@ import sys
 import time
 from pathlib import Path
 
-from .config import DEFAULT_CONFIG_PATH, load_config, save_config
+from .config import (DEFAULT_CONFIG_PATH, PROVIDER_DEFAULTS,
+                     apply_provider_defaults, load_config, save_config)
 
 
 def main(argv=None) -> int:
@@ -17,6 +18,9 @@ def main(argv=None) -> int:
     )
     parser.add_argument("--config", type=Path, default=None,
                         help=f"config file (default: {DEFAULT_CONFIG_PATH})")
+    parser.add_argument("--provider", choices=sorted(PROVIDER_DEFAULTS), default=None,
+                        help="override the provider, with its default model and pricing")
+    parser.add_argument("--model", default=None, help="override the model id")
     sub = parser.add_subparsers(dest="command")
 
     sub.add_parser("run", help="start the overlay app (default)")
@@ -32,6 +36,10 @@ def main(argv=None) -> int:
 
     args = parser.parse_args(argv)
     config = load_config(args.config)
+    if args.provider:
+        apply_provider_defaults(config, args.provider)
+    if args.model:
+        config.model.model = args.model
     command = args.command or "run"
 
     if command == "init-config":
@@ -60,11 +68,11 @@ def _run(config) -> int:
 
 def _ask(config, args) -> int:
     from .capture import capture_once, encode_jpeg
-    from .provider import AnthropicProvider, MissingAPIKey
+    from .provider import MissingAPIKey, create_provider
 
     question = " ".join(args.question) or config.watch.question
     try:
-        provider = AnthropicProvider(config.model, config.resolved_api_key())
+        provider = create_provider(config.model, config.resolved_api_key())
     except MissingAPIKey as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
@@ -91,7 +99,7 @@ def _ask(config, args) -> int:
     )
     note = " (truncated at deadline)" if answer.truncated else ""
     print(
-        f"[{time.monotonic() - started:.2f}s{note} · "
+        f"[{config.model.model} · {time.monotonic() - started:.2f}s{note} · "
         f"{answer.input_tokens} in / {answer.output_tokens} out · ${cost:.5f}]",
         file=sys.stderr,
     )
@@ -100,10 +108,14 @@ def _ask(config, args) -> int:
 
 def _doctor(config) -> int:
     ok = True
+    provider = config.model.provider.lower()
+    sdk = {"openai": "openai", "anthropic": "anthropic"}.get(provider, "openai")
+    print(f"provider: {provider} · model: {config.model.model}")
+
     for module, why in (
         ("mss", "screen capture"),
         ("PIL", "image encoding"),
-        ("anthropic", "Claude API"),
+        (sdk, f"{provider} API"),
         ("pynput", "global hotkeys"),
         ("tkinter", "overlay window"),
     ):
@@ -114,13 +126,19 @@ def _doctor(config) -> int:
             ok = False
             print(f"  FAIL  {module:<10} ({why}): {exc}")
 
+    env_var = config.api_key_env_var
     if config.resolved_api_key():
-        print("  ok    API key found")
+        print(f"  ok    API key found ({env_var})")
     else:
         ok = False
-        print("  FAIL  no API key (set ANTHROPIC_API_KEY)")
-        print("        A Claude Pro/Max subscription does not include API access;")
-        print("        create a key at https://console.anthropic.com/settings/keys")
+        print(f"  FAIL  no API key (set {env_var})")
+        if provider == "openai":
+            print("        A ChatGPT subscription is billed separately from the API;")
+            print("        create a key at https://platform.openai.com/api-keys")
+            print("        and make sure the organisation has credit.")
+        else:
+            print("        A Claude Pro/Max subscription does not include API access;")
+            print("        create a key at https://console.anthropic.com/settings/keys")
 
     try:
         from .capture import capture_once

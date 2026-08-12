@@ -29,7 +29,8 @@ class TestConfig(unittest.TestCase):
             path = Path(tmp) / "config.json"
             save_config(Config(), path)
             loaded = load_config(path)
-            self.assertEqual(loaded.model.model, "claude-haiku-4-5")
+            self.assertEqual(loaded.model.provider, "openai")
+            self.assertEqual(loaded.model.model, "gpt-5.6-luna")
             self.assertEqual(loaded.model.deadline_seconds, 4.0)
 
     def test_partial_config_keeps_defaults(self):
@@ -41,18 +42,18 @@ class TestConfig(unittest.TestCase):
                                         "unknown_section": {"x": 1}}))
             loaded = load_config(path)
             self.assertEqual(loaded.model.max_tokens, 42)
-            self.assertEqual(loaded.model.model, "claude-haiku-4-5")
+            self.assertEqual(loaded.model.model, "gpt-5.6-luna")
             self.assertEqual(loaded.capture.max_width, 1280)
 
     def test_api_key_from_env(self):
         import os
         from unittest import mock
 
-        config = Config()
-        with mock.patch.dict(os.environ, {"ANTHROPIC_API_KEY": "sk-test"}):
+        config = Config()  # defaults to the openai provider
+        with mock.patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test"}):
             self.assertEqual(config.resolved_api_key(), "sk-test")
         config.model.api_key = "sk-explicit"
-        with mock.patch.dict(os.environ, {"ANTHROPIC_API_KEY": "sk-test"}):
+        with mock.patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test"}):
             self.assertEqual(config.resolved_api_key(), "sk-explicit")
 
 

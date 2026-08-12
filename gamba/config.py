@@ -46,17 +46,50 @@ class CaptureConfig:
 
 @dataclass
 class ModelConfig:
-    model: str = "claude-haiku-4-5"
+    #: "openai" or "anthropic".
+    provider: str = "openai"
+    model: str = "gpt-5.6-luna"
     max_tokens: int = 300
     system_prompt: str = DEFAULT_SYSTEM_PROMPT
     #: Hard wall-clock budget for one answer. Streaming stops at this point and
     #: whatever has arrived is kept.
     deadline_seconds: float = 4.0
+    #: OpenAI only. "none" turns reasoning off, which is what keeps GPT-5.6
+    #: inside the latency budget. Set to "" to omit the parameter entirely
+    #: (required for models that don't accept it, e.g. gpt-4.1).
+    reasoning_effort: str = "none"
+    #: OpenAI only: "auto", "low" (cheap, 512px - too lossy for small text),
+    #: or "high" (best for reading dense UI text).
+    image_detail: str = "auto"
+    #: Optional endpoint override (Azure, a gateway, a local proxy).
+    base_url: str = ""
     #: USD per million tokens, used only for the running cost readout.
-    input_cost_per_mtok: float = 1.0
-    output_cost_per_mtok: float = 5.0
-    #: Read from ANTHROPIC_API_KEY if left empty.
+    input_cost_per_mtok: float = 0.20
+    output_cost_per_mtok: float = 1.20
+    #: Read from OPENAI_API_KEY / ANTHROPIC_API_KEY if left empty.
     api_key: str = ""
+
+
+#: Sensible defaults per provider, applied by `--provider` on the command line.
+PROVIDER_DEFAULTS = {
+    "openai": {
+        "model": "gpt-5.6-luna",
+        "reasoning_effort": "none",
+        "input_cost_per_mtok": 0.20,
+        "output_cost_per_mtok": 1.20,
+    },
+    "anthropic": {
+        "model": "claude-haiku-4-5",
+        "reasoning_effort": "",
+        "input_cost_per_mtok": 1.0,
+        "output_cost_per_mtok": 5.0,
+    },
+}
+
+API_KEY_ENV_VARS = {
+    "openai": "OPENAI_API_KEY",
+    "anthropic": "ANTHROPIC_API_KEY",
+}
 
 
 @dataclass
@@ -108,8 +141,30 @@ class Config:
     hotkeys: HotkeyConfig = field(default_factory=HotkeyConfig)
     ui: UIConfig = field(default_factory=UIConfig)
 
+    @property
+    def api_key_env_var(self) -> str:
+        return API_KEY_ENV_VARS.get(self.model.provider.lower(), "OPENAI_API_KEY")
+
     def resolved_api_key(self) -> str:
-        return self.model.api_key or os.environ.get("ANTHROPIC_API_KEY", "")
+        return self.model.api_key or os.environ.get(self.api_key_env_var, "")
+
+
+def apply_provider_defaults(config: "Config", provider: str) -> "Config":
+    """Switch providers, taking that provider's model and pricing with it.
+
+    Used by the `--provider` flag: picking a provider without also restating
+    the model and its per-token prices should not leave the previous
+    provider's values behind.
+    """
+    provider = provider.lower()
+    if provider not in PROVIDER_DEFAULTS:
+        raise ValueError(
+            f"Unknown provider {provider!r}. Use \"openai\" or \"anthropic\"."
+        )
+    config.model.provider = provider
+    for key, value in PROVIDER_DEFAULTS[provider].items():
+        setattr(config.model, key, value)
+    return config
 
 
 def _merge(instance: Any, data: dict) -> Any:

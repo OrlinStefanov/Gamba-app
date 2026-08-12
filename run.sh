@@ -11,10 +11,10 @@ if [ ! -d .venv ]; then
   .venv/bin/python -m pip install -r requirements.txt
 fi
 
-if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
-  echo "ANTHROPIC_API_KEY is not set."
-  echo "Get a key at https://console.anthropic.com/settings/keys, then:"
-  echo "    export ANTHROPIC_API_KEY=sk-ant-..."
+if [ -z "${OPENAI_API_KEY:-}" ]; then
+  echo "OPENAI_API_KEY is not set."
+  echo "Get a key at https://platform.openai.com/api-keys, then:"
+  echo "    export OPENAI_API_KEY=sk-proj-..."
   echo
 fi
 

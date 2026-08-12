@@ -11,14 +11,14 @@ from .capture import ScreenCapturer, encode_jpeg, should_trigger
 from .config import Config
 from .hotkeys import HotkeyManager
 from .overlay import Overlay
-from .provider import AnthropicProvider, Answer, Usage
+from .provider import Answer, Usage, create_provider
 
 
 class GambaApp:
     def __init__(self, config: Config) -> None:
         self.config = config
         self.usage = Usage()
-        self.provider = AnthropicProvider(config.model, config.resolved_api_key())
+        self.provider = create_provider(config.model, config.resolved_api_key())
         self.capturer = ScreenCapturer(config.capture)
         self.overlay = Overlay(config.ui, on_question=self.ask, on_quit=self._teardown)
         self.hotkeys = HotkeyManager(

@@ -8,19 +8,35 @@ Runs on Windows, macOS and Linux. Python 3.10+.
 
 ---
 
-## About API access and your Pro plan
+## Models and API keys
 
-**A Claude Pro or Max subscription does not include API access.** Those plans
-cover claude.ai and Claude Code; they can't be used to authenticate a program
-like this one. You need a separate pay-as-you-go key from
-[console.anthropic.com](https://console.anthropic.com/settings/keys) — the two
-are billed independently.
+Gamba talks to **OpenAI** by default and can switch to **Anthropic** with one
+flag. Both are streamed the same way and both obey the same deadline.
 
-The good news is that this app is deliberately cheap to run. It defaults to
-**Claude Haiku 4.5** ($1 per million input tokens, $5 per million output), sends
-a single downscaled JPEG, and caps the reply at 300 tokens. A typical ask is
-roughly **1,500 input + 40 output tokens ≈ $0.0017** — about 600 questions per
-dollar. The overlay shows a running total so you always know where you are.
+| Provider | Default model | Price per 1M tokens | Env var |
+| --- | --- | --- | --- |
+| `openai` (default) | `gpt-5.6-luna` | $0.20 in / $1.20 out | `OPENAI_API_KEY` |
+| `anthropic` | `claude-haiku-4-5` | $1 in / $5 out | `ANTHROPIC_API_KEY` |
+
+**Why `gpt-5.6-luna`:** it is the fast, low-cost tier of the GPT-5.6 family, it
+accepts image input, and — the part that matters for a 4-second budget — it
+supports `reasoning_effort: "none"`, which switches reasoning off entirely.
+Reading a screen and answering is mostly extraction, not deliberation, so
+reasoning tokens here are almost pure latency. Gamba sets `"none"` by default.
+Raise it to `"low"` in the config if you are pointing it at something that
+genuinely needs multi-step thinking, and raise `deadline_seconds` with it.
+
+A typical ask is roughly **1,500 input + 40 output tokens ≈ $0.0003** — about
+3,000 questions per dollar. The overlay shows a running total.
+
+> **A ChatGPT subscription does not include API usage.** ChatGPT Plus/Pro and
+> the API are billed separately. But if you have used **Agent Builder**, you
+> already have a platform account, which *is* the API side — grab a key from
+> [platform.openai.com/api-keys](https://platform.openai.com/api-keys) and make
+> sure the organisation has credit on it. The same split applies on the
+> Anthropic side: Claude Pro/Max does not cover API calls, so that provider
+> needs its own key from
+> [console.anthropic.com](https://console.anthropic.com/settings/keys).
 
 ---
 
@@ -30,12 +46,20 @@ dollar. The overlay shows a running total so you always know where you are.
 git clone <this repo> && cd Gamba-app
 
 # Windows
-setx ANTHROPIC_API_KEY sk-ant-...      # then open a new terminal
+setx OPENAI_API_KEY sk-proj-...        # then open a new terminal
 run.bat
 
 # macOS / Linux
-export ANTHROPIC_API_KEY=sk-ant-...
+export OPENAI_API_KEY=sk-proj-...
 ./run.sh
+```
+
+To run against Anthropic instead, export `ANTHROPIC_API_KEY` and either pass
+`--provider anthropic` or set `"provider": "anthropic"` in the config:
+
+```sh
+python -m gamba --provider anthropic          # switches model and pricing too
+python -m gamba --model gpt-5.6-terra          # keep the provider, change model
 ```
 
 The launcher creates a virtualenv and installs dependencies on first run. To do
@@ -96,6 +120,8 @@ The budget is enforced end-to-end, not hoped for:
   than a grab + resize (~50–150ms on a 4K display).
 - **Small payload.** 1280px wide, JPEG quality 60 — enough to read UI text,
   small enough to upload fast and keep the token count near 1,500.
+- **Reasoning off.** `reasoning_effort: "none"` on GPT-5.6 removes a variable
+  and often multi-second thinking phase before the first token appears.
 - **Streaming with an answer-first prompt.** The model is instructed to put the
   answer on the first line alone, so the useful part of the response lands in
   the first few hundred milliseconds of streaming.
@@ -127,11 +153,17 @@ Every key is optional — missing ones fall back to the defaults.
     "fps": 4.0
   },
   "model": {
-    "model": "claude-haiku-4-5",
+    "provider": "openai",         // or "anthropic"
+    "model": "gpt-5.6-luna",
     "max_tokens": 300,
     "deadline_seconds": 4.0,
-    "system_prompt": "...",   // rewrite this to change the answer format
-    "api_key": ""             // leave empty to use ANTHROPIC_API_KEY
+    "reasoning_effort": "none",   // OpenAI only; "" omits the parameter
+    "image_detail": "auto",       // OpenAI only: auto | low | high
+    "base_url": "",               // optional: Azure, a gateway, a local proxy
+    "input_cost_per_mtok": 0.20,  // display only - update if prices move
+    "output_cost_per_mtok": 1.20,
+    "system_prompt": "...",       // rewrite this to change the answer format
+    "api_key": ""                 // leave empty to use the env var
   },
   "watch": {
     "enabled_at_startup": false,
@@ -152,8 +184,14 @@ UI `x`/`y` are measured from the right/bottom edge when negative.
 
 - Answers cut off? Raise `deadline_seconds` or `max_tokens`.
 - Want it cheaper? Drop `max_width` to 1024 and `max_tokens` to 150.
-- Text unreadable to the model? Raise `max_width` and `jpeg_quality`, or set a
-  `region` around just the part of the screen that matters.
+- Text unreadable to the model? Raise `max_width` and `jpeg_quality`, set
+  `image_detail` to `"high"`, or set a `region` around just the part of the
+  screen that matters.
+- Need more accuracy on hard questions? Move up a tier (`gpt-5.6-terra`,
+  `gpt-5.6-sol`) or raise `reasoning_effort` to `"low"` — and raise
+  `deadline_seconds` to match, since both cost time.
+- Using a model outside the GPT-5 family (`gpt-4.1-mini`)? Set
+  `reasoning_effort` to `""`, or the request is rejected with a 400.
 - Want a different answer style? Rewrite `system_prompt` — it's the whole
   contract, and the first line of the reply is what the overlay shows large.
 
@@ -163,14 +201,19 @@ UI `x`/`y` are measured from the right/bottom edge when negative.
 
 ```
 gamba/
-  capture.py    background screen capture, downscaling, change detection
-  provider.py   Claude vision call, streaming, deadline, cost accounting
-  overlay.py    always-on-top tkinter HUD (thread-safe via a command queue)
-  hotkeys.py    global hotkeys (pynput)
-  app.py        wiring: capture + hotkeys + continuous mode + overlay
-  config.py     JSON config with defaults
-tests/          unit tests (no screen, key or network required)
+  capture.py             background screen capture, downscaling, change detection
+  provider.py            shared result types + the provider factory
+  openai_provider.py     OpenAI vision call, streaming, deadline, error mapping
+  anthropic_provider.py  the same against Claude
+  overlay.py             always-on-top tkinter HUD (thread-safe command queue)
+  hotkeys.py             global hotkeys (pynput)
+  app.py                 wiring: capture + hotkeys + continuous mode + overlay
+  config.py              JSON config with per-provider defaults
+tests/                   unit tests (no screen, key or network required)
 ```
+
+Each provider module imports its SDK lazily, so only the one you actually use
+has to be installed.
 
 Run the tests with `python -m unittest discover -s tests`.
 

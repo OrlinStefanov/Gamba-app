@@ -8,8 +8,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from gamba.anthropic_provider import AnthropicProvider
 from gamba.config import ModelConfig
-from gamba.provider import AnthropicProvider, MissingAPIKey
+from gamba.provider import MissingAPIKey
 
 
 def event(kind, **kwargs):
@@ -60,6 +61,8 @@ def install_fake_stream(provider, stream):
 
 
 def build_provider(**overrides):
+    overrides.setdefault("provider", "anthropic")
+    overrides.setdefault("model", "claude-haiku-4-5")
     config = ModelConfig(**overrides)
     return AnthropicProvider(config, api_key="sk-test-not-used")
 
