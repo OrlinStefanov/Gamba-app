@@ -34,12 +34,36 @@ python3 -m beachflag                            # approximate, from your IP
 python3 -m beachflag --lat 26.14 --lon -80.10   # exact coordinates
 python3 -m beachflag --serve                    # local web app, real GPS
 python3 -m beachflag --demo storm               # offline sample day, no network
+python3 -m beachflag --list-demos               # seven sample days
 ```
 
 `--serve` is the one to use on a phone or laptop at the beach: it runs a small
 server on localhost, opens a page, and asks the browser for your actual
 position. Your coordinates go from your browser to that local process and out
 to Open-Meteo, and nowhere else.
+
+You can also deep-link straight into a prediction:
+`http://localhost:8765/?demo=building` or `/?lat=26.14&lon=-80.10`.
+
+### The timeline is scrubbable
+
+The web app's timeline is not just a picture of the next two days — **drag it and
+the whole page moves to that hour**. The flag, the reasons, the drivers and every
+condition are recomputed per hour and sent with the response, so scrubbing is
+instant and works offline once loaded.
+
+- **Drag the bars**, drag the slider, or use the **left/right arrow keys** to
+  step an hour at a time.
+- Bar **colour** is the flag; bar **height** is the hazard index; **shaded** bars
+  are night; a ring marks **now** and a thick outline marks the hour you are on.
+- The header says which hour you are looking at and how far off it is —
+  `Tue 1 Sep, 22:00 · in 36 hours`.
+- **Back to now** returns to the current hour. The strip includes six hours of
+  history by default, so you can scrub backwards too (`&back=12` for more).
+
+`--demo building` is the scenario to try it on: a day where the swell fills in
+from flat to solid, so the strip runs green through yellow into red and the
+deciding hazard switches from surf to rip currents as you drag.
 
 ## What it looks like
 

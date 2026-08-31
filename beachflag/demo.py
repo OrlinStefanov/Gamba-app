@@ -17,7 +17,8 @@ from typing import Any
 from .geo import Location
 from .shoreline import Shoreline, assumed_shoreline
 
-HOURS = 144  # 2 days of history + 4 days ahead, matching a live request.
+PAST_HOURS = 48   # 2 days of history, matching what a live request asks for.
+HOURS = 144       # ...plus 4 days ahead.
 
 
 @dataclass(frozen=True)
@@ -45,6 +46,9 @@ class Scenario:
     thunderstorm: bool = False
     visibility: float = 24000.0
     current_speed_kmh: float = 0.4
+    build_swing: float = 0.35   # sinusoidal variation of the swell across the window
+    build_start: float = 1.0    # swell multiplier at the start of today
+    build_end: float = 1.0      # swell multiplier at the end of the forecast
 
     def shoreline(self) -> Shoreline:
         return assumed_shoreline(self.facing)
@@ -107,6 +111,19 @@ SCENARIOS: dict[str, Scenario] = {
         wind_speed=9.0, wind_direction=270.0, gust_factor=1.5,
         air_temperature=30.0, uv_index=10.0, cape=600.0, rain_mm=0.0,
     ),
+    "building": Scenario(
+        key="building",
+        title="Swell filling in through the day - green through yellow to red",
+        location=Location(-33.8910, 151.2770, "Bondi Beach", "Australia", "New South Wales",
+                          source="demo"),
+        facing=105.0,
+        expectation="climbs green to red across the timeline",
+        wave_height=0.95, wave_period=10.5, wave_direction=110.0, swell_share=0.8,
+        build_swing=0.08, build_start=0.25, build_end=2.35,
+        sea_temperature=21.0, tide_range=1.7,
+        wind_speed=5.0, wind_direction=110.0, gust_factor=1.5,
+        air_temperature=25.0, uv_index=9.0, cape=250.0, rain_mm=0.0,
+    ),
     "runoff": Scenario(
         key="runoff",
         title="Calm surf two days after heavy rain",
@@ -123,13 +140,19 @@ SCENARIOS: dict[str, Scenario] = {
 
 def start_of_series(reference: datetime | None = None) -> datetime:
     base = (reference or datetime.now()).replace(minute=0, second=0, microsecond=0, hour=0)
-    return base - timedelta(days=2)
+    return base - timedelta(hours=PAST_HOURS)
 
 
 def payloads(scenario: Scenario, reference: datetime | None = None) -> tuple[dict[str, Any], dict[str, Any]]:
     """Build (marine, weather) payloads shaped exactly like Open-Meteo's."""
     start = start_of_series(reference)
     times = [start + timedelta(hours=i) for i in range(HOURS)]
+    # Where "now" sits in the series, so a scenario that builds builds from the
+    # moment you look at it rather than from midnight.
+    now_index = (reference or datetime.now()).replace(
+        minute=0, second=0, microsecond=0
+    ) - start
+    now_index = now_index.total_seconds() / 3600.0
     stamps = [t.strftime("%Y-%m-%dT%H:%M") for t in times]
 
     marine: dict[str, list[Any]] = {k: [] for k in (
@@ -148,8 +171,13 @@ def payloads(scenario: Scenario, reference: datetime | None = None) -> tuple[dic
 
     for index, moment in enumerate(times):
         hour = moment.hour
-        # A gentle swell build across the window, so the timeline is not flat.
-        build = 1.0 + 0.35 * math.sin(index / 30.0)
+        # Swell varies across the window so the timeline is not a flat colour: a
+        # slow sinusoid, over a ramp from build_start to build_end across the 48
+        # hours after "now" - so a scenario that says it turns actually turns on
+        # screen, whatever hour you open it at.
+        progress = min(1.0, max(0.0, (index - now_index) / 48.0))
+        ramp = scenario.build_start + (scenario.build_end - scenario.build_start) * progress
+        build = max(0.12, ramp + scenario.build_swing * math.sin(index / 30.0))
         # Semidiurnal tide, 12.42 h period.
         tide = (scenario.tide_range / 2.0) * math.sin(2 * math.pi * index / 12.42)
         daylight = 6 <= hour < 20
@@ -204,14 +232,14 @@ def payloads(scenario: Scenario, reference: datetime | None = None) -> tuple[dic
     marine_payload = {
         "latitude": scenario.location.latitude,
         "longitude": scenario.location.longitude,
-        "timezone": "Europe/Lisbon",
+        "timezone": "local",
         "utc_offset_seconds": 0,
         "hourly": {"time": stamps, **marine},
     }
     weather_payload = {
         "latitude": scenario.location.latitude,
         "longitude": scenario.location.longitude,
-        "timezone": "Europe/Lisbon",
+        "timezone": "local",
         "utc_offset_seconds": 0,
         "hourly": {"time": stamps, **weather},
         "daily": {"time": [d.isoformat() for d in days], **daily},

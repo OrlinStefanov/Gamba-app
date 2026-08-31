@@ -398,11 +398,91 @@ class TestRender(unittest.TestCase):
         self.assertEqual(len(round_tripped["drivers"]), len(self.prediction.drivers))
 
 
+class TestScrubbableTimeline(unittest.TestCase):
+    """The web timeline is only useful if each hour stands on its own."""
+
+    def payload(self, scenario="building", hours=48):
+        return web.predict_payload({"demo": [scenario], "hours": [str(hours)]})
+
+    def test_timeline_spans_history_and_forecast(self):
+        payload = self.payload(hours=24)
+        self.assertEqual(len(payload["timeline"]), 30)  # 24 ahead + 6 back
+        times = [entry["time"] for entry in payload["timeline"]]
+        self.assertEqual(times, sorted(times))
+        self.assertLess(times[0], payload["now"])
+        self.assertGreater(times[-1], payload["now"])
+
+    def test_a_turning_day_actually_changes_flag(self):
+        # Without this the scrubber has nothing to show: the demo day has to
+        # cross flag boundaries, not sit on one colour for two days.
+        levels = {entry["flag"]["key"] for entry in self.payload()["timeline"]}
+        self.assertIn("green", levels)
+        self.assertIn("yellow", levels)
+        self.assertIn("red", levels)
+
+    def test_flags_climb_in_order_as_the_swell_fills_in(self):
+        heights = [e["metrics"]["breaker_height_m"] for e in self.payload()["timeline"]]
+        self.assertGreater(heights[-1], heights[0] * 2)
+
+    def test_every_frame_can_render_a_full_card(self):
+        for entry in self.payload(hours=24)["timeline"]:
+            for key in ("time", "flag", "headline", "hazard_index", "confidence",
+                        "advisories", "drivers", "metrics", "observations"):
+                self.assertIn(key, entry, entry.get("time"))
+            self.assertIn("label", entry["flag"])
+            self.assertIn("advice", entry["flag"])
+            self.assertEqual(len(entry["drivers"]), 10)
+
+    def test_now_index_points_at_the_current_hour(self):
+        payload = self.payload()
+        index = payload["now_index"]
+        self.assertIsNotNone(index)
+        self.assertEqual(payload["timeline"][index]["time"], payload["time"])
+        self.assertEqual(payload["timeline"][index]["flag"]["key"], payload["flag"]["key"])
+
+    def test_frames_match_a_direct_prediction_for_the_same_hour(self):
+        scenario = demo.SCENARIOS["building"]
+        forecast = sources.build(*demo.payloads(scenario, REFERENCE))
+        series = model.predict_series(forecast, scenario.shoreline(), REFERENCE, 12)
+        for prediction in series:
+            built = render.frame(prediction, forecast)
+            self.assertEqual(built["flag"]["key"], prediction.flag.name.lower())
+            self.assertEqual(built["headline"], prediction.headline)
+
+    def test_cli_json_keeps_the_compact_timeline(self):
+        # Detail is for the scrubber; piping to a script should not carry it.
+        scenario = demo.SCENARIOS["building"]
+        forecast = sources.build(*demo.payloads(scenario, REFERENCE))
+        payload = render.as_dict(
+            model.predict(forecast.at(REFERENCE), scenario.shoreline(), forecast=forecast),
+            location=scenario.location,
+            shore=scenario.shoreline(),
+            forecast=forecast,
+            profile=BEACH_PROFILES["sandy"],
+            timeline=model.predict_series(forecast, scenario.shoreline(), REFERENCE, 4),
+        )
+        entry = payload["timeline"][0]
+        self.assertIsInstance(entry["flag"], str)
+        self.assertNotIn("drivers", entry)
+
+
 class TestWebApi(unittest.TestCase):
+    def test_favicon_is_served_inline(self):
+        self.assertIn("<svg", web.FAVICON)
+
     def test_demo_payload(self):
-        payload = web.predict_payload({"demo": ["storm"], "hours": ["12"]})
+        payload = web.predict_payload({"demo": ["storm"], "hours": ["12"], "back": ["0"]})
         self.assertEqual(payload["flag"]["key"], "double_red")
         self.assertEqual(len(payload["timeline"]), 12)
+
+    def test_back_hours_put_now_inside_the_strip(self):
+        # Without history the now marker sits on the first bar and there is
+        # nothing to scrub back to.
+        payload = web.predict_payload({"demo": ["calm"], "hours": ["12"], "back": ["6"]})
+        self.assertEqual(len(payload["timeline"]), 18)
+        self.assertEqual(payload["now_index"], 6)
+        self.assertEqual(web.predict_payload(
+            {"demo": ["calm"], "hours": ["12"], "back": ["0"]})["now_index"], 0)
 
     def test_missing_coordinates_are_rejected(self):
         with self.assertRaises(ValueError):
@@ -415,6 +495,8 @@ class TestWebApi(unittest.TestCase):
     def test_hours_are_clamped(self):
         payload = web.predict_payload({"demo": ["calm"], "hours": ["9999"]})
         self.assertLessEqual(len(payload["timeline"]), 96)
+        # The scrubber needs at least two frames to be draggable.
+        self.assertGreaterEqual(len(web.predict_payload({"demo": ["calm"], "hours": ["0"]})["timeline"]), 2)
 
     def test_facing_override_is_honoured(self):
         payload = web.predict_payload({"demo": ["calm"], "facing": ["45"]})

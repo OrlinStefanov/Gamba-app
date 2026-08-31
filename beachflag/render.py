@@ -178,7 +178,7 @@ def _condition_lines(prediction: Prediction, forecast: Forecast, units: Units) -
             f"{units.height(m.deep_height)} at {m.deep_period:.0f} s from {direction}"
             f" ({m.incidence:+.0f} deg off shore-normal)",
         ))
-        rows.append(("Wave power", f"{m.wave_power:.0f} kW/m of beach"))
+        rows.append(("Wave power", f"{_kw(m.wave_power)} kW/m of beach"))
         rows.append(("Surf zone", f"about {units.distance(m.surf_zone_width)} wide"))
         rows.append(("Beach state", f"{m.beach_state} (omega {m.omega:.1f})"))
     else:
@@ -212,6 +212,11 @@ def _condition_lines(prediction: Prediction, forecast: Forecast, units: Units) -
             rows.append(("UV index", f"{hour.uv_index:.0f}"))
 
     return [f"    {label:<16} {value}" for label, value in rows]
+
+
+def _kw(value: float) -> str:
+    """Wave power spans three orders of magnitude; a fixed precision loses the low end."""
+    return f"{value:.1f}" if value < 10 else f"{value:.0f}"
 
 
 def _tide_word(phase: float) -> str:
@@ -297,36 +302,18 @@ def _wrap(text: str, indent: int = 4, bullet: str = "") -> list[str]:
 # JSON
 # --------------------------------------------------------------------------
 
-def as_dict(
-    prediction: Prediction,
-    *,
-    location: Location,
-    shore: Shoreline,
-    forecast: Forecast,
-    profile: BeachProfile,
-    timeline: tuple[Prediction, ...] = (),
-    window: tuple[datetime, datetime] | None = None,
-) -> dict:
-    """Machine-readable form of the same answer, for the web UI and for piping."""
+def frame(prediction: Prediction, forecast: Forecast) -> dict:
+    """One hour of assessment, complete enough to render a full card from.
+
+    The web app's timeline scrubber needs every hour to stand on its own - drag
+    the slider and the flag, the reasons and the conditions all have to change
+    together - so a frame carries the whole answer for its hour rather than
+    just a colour.
+    """
     info = FLAG_INFO[prediction.flag]
     hour = forecast.at(prediction.time)
     m = prediction.metrics
     return {
-        "location": {
-            "latitude": location.latitude,
-            "longitude": location.longitude,
-            "label": location.label(),
-            "source": location.source,
-        },
-        "shoreline": {
-            "facing_degrees": round(shore.facing, 1),
-            "facing_compass": compass_point(shore.facing),
-            "confidence": shore.confidence,
-            "sheltered": shore.is_sheltered,
-            "source": shore.source,
-        },
-        "beach_profile": profile.name,
-        "timezone": forecast.timezone_name,
         "time": prediction.time.isoformat(),
         "flag": {
             "key": prediction.flag.name.lower(),
@@ -395,18 +382,49 @@ def as_dict(
             "visibility_m": hour.visibility,
             "is_day": hour.is_day,
         },
+    }
+
+
+def as_dict(
+    prediction: Prediction,
+    *,
+    location: Location,
+    shore: Shoreline,
+    forecast: Forecast,
+    profile: BeachProfile,
+    timeline: tuple[Prediction, ...] = (),
+    window: tuple[datetime, datetime] | None = None,
+    now: datetime | None = None,
+    detail: bool = False,
+) -> dict:
+    """Machine-readable form of the same answer, for the web UI and for piping.
+
+    `detail` fills every timeline entry with a complete frame, which is what the
+    scrubber needs; without it the timeline stays a compact strip, which is what
+    `--json` on the command line wants.
+    """
+    payload = {
+        "location": {
+            "latitude": location.latitude,
+            "longitude": location.longitude,
+            "label": location.label(),
+            "source": location.source,
+        },
+        "shoreline": {
+            "facing_degrees": round(shore.facing, 1),
+            "facing_compass": compass_point(shore.facing),
+            "confidence": shore.confidence,
+            "sheltered": shore.is_sheltered,
+            "source": shore.source,
+        },
+        "beach_profile": profile.name,
+        "timezone": forecast.timezone_name,
+        **frame(prediction, forecast),
         "timeline": [
-            {
-                "time": p.time.isoformat(),
-                "flag": p.flag.name.lower(),
-                "level": int(p.flag),
-                "color": FLAG_INFO[p.flag].hex_color,
-                "hazard_index": p.score,
-                "breaker_height_m": round(p.metrics.breaker_height, 2),
-                "rip_peak_ms": round(p.metrics.rip_peak, 2),
-            }
-            for p in timeline
+            _timeline_entry(p, forecast, detail=detail) for p in timeline
         ],
+        "now": (now or prediction.time).isoformat(),
+        "now_index": _now_index(timeline, now or prediction.time),
         "best_window": None if window is None else {
             "start": window[0].isoformat(),
             "end": window[1].isoformat(),
@@ -416,3 +434,32 @@ def as_dict(
             "Where a real flag is flying, that flag wins."
         ),
     }
+    return payload
+
+
+def _timeline_entry(prediction: Prediction, forecast: Forecast, *, detail: bool) -> dict:
+    """A strip entry, or a whole frame when the scrubber is going to render it."""
+    if detail:
+        entry = frame(prediction, forecast)
+        entry["breaker_height_m"] = round(prediction.metrics.breaker_height, 2)
+        entry["rip_peak_ms"] = round(prediction.metrics.rip_peak, 2)
+        return entry
+    return {
+        "time": prediction.time.isoformat(),
+        "flag": prediction.flag.name.lower(),
+        "level": int(prediction.flag),
+        "color": FLAG_INFO[prediction.flag].hex_color,
+        "hazard_index": prediction.score,
+        "breaker_height_m": round(prediction.metrics.breaker_height, 2),
+        "rip_peak_ms": round(prediction.metrics.rip_peak, 2),
+    }
+
+
+def _now_index(timeline: tuple[Prediction, ...], now: datetime) -> int | None:
+    """Which frame the scrubber should open on."""
+    if not timeline:
+        return None
+    return min(
+        range(len(timeline)),
+        key=lambda i: abs((timeline[i].time - now).total_seconds()),
+    )
