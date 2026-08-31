@@ -23,6 +23,7 @@ from datetime import datetime, time as dtime
 from . import physics
 from .flags import Advisory, Flag
 from .geo import compass_point, wrap180
+from .numfmt import fmt
 from .physics import BeachProfile, DEFAULT_PROFILE
 from .shoreline import Shoreline
 from .sources import Forecast, Hour
@@ -245,8 +246,8 @@ def _surf_driver(m: Metrics) -> Driver:
         detail = "Flat - no meaningful surf."
     else:
         detail = (
-            f"{hb:.1f} m {m.breaker_type} breakers from a {m.deep_height:.1f} m / "
-            f"{m.deep_period:.0f} s swell; surf zone about {m.surf_zone_width:.0f} m wide."
+            f"{fmt(hb, 1)} m {m.breaker_type} breakers from a {fmt(m.deep_height, 1)} m / "
+            f"{fmt(m.deep_period, 0)} s swell; surf zone about {fmt(m.surf_zone_width, 0)} m wide."
         )
         if m.shelter < 0.5:
             detail += " Mostly blocked by land, so much of that swell never arrives."
@@ -268,7 +269,7 @@ def _shorebreak_driver(m: Metrics, profile: BeachProfile) -> Driver:
     demand = ladder(severity, yellow=0.25, red=0.6, double_red=1.01)
     detail = (
         f"Waves are {m.breaker_type} onto a {profile.name} profile "
-        f"(Iribarren {m.iribarren:.1f}) - a dumping shore break that injures necks and shoulders."
+        f"(Iribarren {fmt(m.iribarren, 1)}) - a dumping shore break that injures necks and shoulders."
     )
     return Driver("shorebreak", "Shore break", score, demand, detail)
 
@@ -287,7 +288,7 @@ def _rip_driver(m: Metrics, swimmer: Swimmer) -> Driver:
             else "within what you could swim against, briefly"
         )
         detail = (
-            f"Rip channels running about {m.rip_speed:.1f} m/s, pulsing to {peak:.1f} m/s "
+            f"Rip channels running about {fmt(m.rip_speed, 1)} m/s, pulsing to {fmt(peak, 1)} m/s "
             f"- {comparison}. Beach state: {m.beach_state}."
         )
     return Driver("rip", "Rip currents", score, demand, detail)
@@ -302,8 +303,8 @@ def _longshore_driver(m: Metrics) -> Driver:
     else:
         toward = f" toward the {compass_point(m.longshore_toward)}" if m.longshore_toward is not None else ""
         detail = (
-            f"Longshore current about {v:.1f} m/s{toward} (breakers arriving at "
-            f"{abs(m.breaker_angle):.0f} deg) - it will walk you down the beach."
+            f"Longshore current about {fmt(v, 1)} m/s{toward} (breakers arriving at "
+            f"{fmt(abs(m.breaker_angle), 0)} deg) - it will walk you down the beach."
         )
     return Driver("longshore", "Longshore drift", score, demand, detail)
 
@@ -319,15 +320,15 @@ def _wind_driver(hour: Hour, m: Metrics) -> Driver:
         detail = "Light and variable wind."
     elif m.onshore_wind < -4.0:
         detail = (
-            f"{abs(m.onshore_wind):.0f} m/s offshore wind: it flattens the surf but pushes "
+            f"{fmt(abs(m.onshore_wind), 0)} m/s offshore wind: it flattens the surf but pushes "
             "anything floating - inflatables, boards, air beds - straight out to sea."
         )
         demand = max(demand, Flag.YELLOW)
     elif m.onshore_wind > 8.0:
-        detail = f"{m.onshore_wind:.0f} m/s onshore wind piling up choppy, disorganised surf."
+        detail = f"{fmt(m.onshore_wind, 0)} m/s onshore wind piling up choppy, disorganised surf."
     else:
         direction = compass_point(hour.wind_direction) if hour.wind_direction is not None else "?"
-        detail = f"{speed:.0f} m/s wind from the {direction}, gusting {gusts:.0f} m/s."
+        detail = f"{fmt(speed, 0)} m/s wind from the {direction}, gusting {fmt(gusts, 0)} m/s."
     return Driver("wind", "Wind", score, demand, detail)
 
 
@@ -343,7 +344,7 @@ def _current_driver(hour: Hour) -> Driver:
             if hour.current_direction is not None
             else ""
         )
-        detail = f"Background ocean current {speed:.1f} m/s{toward}, on top of anything the surf does."
+        detail = f"Background ocean current {fmt(speed, 1)} m/s{toward}, on top of anything the surf does."
     return Driver("current", "Ocean current", score, demand, detail)
 
 
@@ -362,15 +363,15 @@ def _thermal_driver(hour: Hour, swimmer: Swimmer) -> Driver:
         demand = Flag.YELLOW
 
     if sst >= 22.0:
-        detail = f"Sea {sst:.0f} C - comfortable."
+        detail = f"Sea {fmt(sst, 0)} C - comfortable."
     elif sst >= 18.0:
-        detail = f"Sea {sst:.0f} C - brisk but fine for a swim."
+        detail = f"Sea {fmt(sst, 0)} C - brisk but fine for a swim."
     elif sst >= 15.0:
-        detail = f"Sea {sst:.0f} C - cold enough to shorten how long you last in it."
+        detail = f"Sea {fmt(sst, 0)} C - cold enough to shorten how long you last in it."
     elif sst >= 10.0:
-        detail = f"Sea {sst:.0f} C - cold shock territory. Enter slowly, or wear a wetsuit."
+        detail = f"Sea {fmt(sst, 0)} C - cold shock territory. Enter slowly, or wear a wetsuit."
     else:
-        detail = f"Sea {sst:.0f} C - cold water shock is the real hazard here, whatever the surf does."
+        detail = f"Sea {fmt(sst, 0)} C - cold water shock is the real hazard here, whatever the surf does."
 
     if sst < swimmer.cold_tolerance:
         detail += f" Below what an unprotected {swimmer.label} should be entering."
@@ -402,13 +403,13 @@ def _storm_driver(hour: Hour) -> Driver:
     if instability > 0.45:
         demand = Flag.YELLOW
         details.append(
-            f"Unstable air (CAPE {cape:.0f} J/kg, {probability:.0f}% rain) - thunderstorms "
+            f"Unstable air (CAPE {fmt(cape, 0)} J/kg, {fmt(probability, 0)}% rain) - thunderstorms "
             "could build with little warning."
         )
     if visibility is not None and visibility < 2000:
         score = max(score, 100.0 * ramp(2000 - visibility, 0.0, 1500.0))
         demand = max(demand, Flag.YELLOW if visibility < 1000 else Flag.GREEN)
-        details.append(f"Visibility down to {visibility / 1000:.1f} km - a swimmer in trouble is hard to spot.")
+        details.append(f"Visibility down to {fmt(visibility / 1000, 1)} km - a swimmer in trouble is hard to spot.")
     if not details:
         details.append("Settled weather.")
     return Driver("storm", "Weather", score, demand, " ".join(details))
@@ -429,7 +430,7 @@ def _water_quality_driver(hour: Hour) -> Driver:
         detail = "No significant recent rain, so runoff is unlikely to be an issue."
     else:
         detail = (
-            f"{r24:.0f} mm of rain in the last 24 h ({r48:.0f} mm over 48 h). Storm drains and "
+            f"{fmt(r24, 0)} mm of rain in the last 24 h ({fmt(r48, 0)} mm over 48 h). Storm drains and "
             "rivers push bacteria onto beaches for a day or two after this - many services post "
             "a swim advisory."
         )
@@ -468,7 +469,7 @@ def _marine_life_driver(hour: Hour, m: Metrics, override: str | None) -> Driver:
         "Marine life",
         score,
         Flag.GREEN,
-        f"Warm water ({sst:.0f} C) with a steady onshore wind is what blows jellyfish and "
+        f"Warm water ({fmt(sst, 0)} C) with a steady onshore wind is what blows jellyfish and "
         "man-o-war ashore. Check the sand and the local notice board.",
     )
 
@@ -600,7 +601,7 @@ def _headline(flag: Flag, by_key: dict[str, Driver], m: Metrics) -> str:
     if flag == Flag.GREEN:
         if m.breaker_height < 0.15:
             return "Flat and calm - about as benign as a beach gets."
-        return f"Small {m.breaker_height:.1f} m surf and nothing else of note."
+        return f"Small {fmt(m.breaker_height, 1)} m surf and nothing else of note."
     subject = {
         "rip": "rip currents",
         "surf": "the surf",

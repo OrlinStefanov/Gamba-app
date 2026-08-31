@@ -4,4 +4,6 @@ __pycache__/
 config.json
 *.jpg
 *.png
+# ...but the web app's icons are source, not stray screenshots.
+!docs/icons/*.png
 .DS_Store

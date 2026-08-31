@@ -1,7 +1,8 @@
 > **This repository holds two apps.** Gamba is below. The other is
 > **[Beach flag predictor](BEACHFLAG.md)** — tells you which safety flag a beach
 > is likely flying from your location, live marine and weather models, and the
-> surf-zone physics behind it. Standard library only: `./beach.sh "Bondi Beach"`.
+> surf-zone physics behind it. Standard library only: `./beach.sh "Bondi Beach"`,
+> or publish `docs/` to GitHub Pages for an installable web app on your phone.
 
 ---
 

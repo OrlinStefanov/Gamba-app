@@ -14,6 +14,46 @@ no signup.**
 
 ---
 
+## On your phone
+
+The app also runs as a **static web app with no server** — the whole model is
+ported to JavaScript and runs in the browser. Publish it once from this repo and
+you get a URL you can open anywhere, and install to your home screen like any
+other app.
+
+To turn it on: **repo Settings → Pages → Source: "Deploy from a branch" →
+Branch: the branch holding `docs/` → folder `/docs` → Save.** A minute later it
+is live at `https://<your-user>.github.io/Gamba-app/`.
+
+Then, on the phone:
+
+- **iPhone (Safari):** Share → *Add to Home Screen*
+- **Android (Chrome):** ⋮ → *Add to Home screen* / *Install app*
+
+You get an icon, a full-screen app, and real GPS (HTTPS is a secure context, so
+the browser will hand over your position). The shell is cached by a service
+worker, so it opens instantly and works with no signal — the forecast itself is
+never cached, because a stale beach flag is worse than none.
+
+Nothing is uploaded anywhere: the page calls Open-Meteo directly from your
+browser and there is no server in between.
+
+### Two implementations, held together
+
+A static page cannot call the Python model, so `docs/js/` is a full port of it.
+Two implementations of a safety calculation is a liability, so
+`tests/test_beachflag_parity.py` runs both over the same fixtures and compares
+the flag, the hazard index, the confidence, the advisories, every metric and
+every driver sentence. **If you change one, change the other — the test will
+tell you.** It found a real divergence the first time it ran: Python rounds an
+exact tie to even (`18.5` → `18`) and JavaScript rounds away from zero (`19`),
+so the same forecast read 18 °C in the terminal and 19 °C in the browser. Both
+now go through `beachflag/numfmt.py`, which matches `toFixed` exactly.
+
+`--serve` and the static page are still two separate front ends over those two
+models. Folding `--serve` onto the static page would remove that duplication and
+is the obvious next step.
+
 ## Quick start
 
 ```sh

@@ -16,6 +16,7 @@ from datetime import datetime
 from .flags import ADVISORY_INFO, FLAG_INFO
 from .geo import Location, compass_point
 from .model import Driver, Prediction, Swimmer
+from .numfmt import fmt, signed
 from .physics import BeachProfile
 from .shoreline import Shoreline
 from .sources import Forecast
@@ -32,18 +33,18 @@ class Units:
     imperial: bool = False
 
     def height(self, metres: float) -> str:
-        return f"{metres * 3.281:.1f} ft" if self.imperial else f"{metres:.1f} m"
+        return f"{fmt(metres * 3.281, 1)} ft" if self.imperial else f"{fmt(metres, 1)} m"
 
     def distance(self, metres: float) -> str:
         if self.imperial:
-            return f"{metres * 3.281:.0f} ft" if metres < 300 else f"{metres / 1609:.1f} mi"
-        return f"{metres:.0f} m" if metres < 1000 else f"{metres / 1000:.1f} km"
+            return f"{fmt(metres * 3.281, 0)} ft" if metres < 300 else f"{fmt(metres / 1609, 1)} mi"
+        return f"{fmt(metres, 0)} m" if metres < 1000 else f"{fmt(metres / 1000, 1)} km"
 
     def speed(self, ms: float) -> str:
-        return f"{ms * 2.237:.0f} mph" if self.imperial else f"{ms:.1f} m/s"
+        return f"{fmt(ms * 2.237, 0)} mph" if self.imperial else f"{fmt(ms, 1)} m/s"
 
     def temperature(self, celsius: float) -> str:
-        return f"{celsius * 9 / 5 + 32:.0f} F" if self.imperial else f"{celsius:.0f} C"
+        return f"{fmt(celsius * 9 / 5 + 32, 0)} F" if self.imperial else f"{fmt(celsius, 0)} C"
 
 
 METRIC = Units(False)
@@ -105,8 +106,8 @@ def report(
         "  "
         + style.dim(
             f"{prediction.time:%a %d %b %H:%M} {forecast.timezone_name} - "
-            f"beach faces {compass_point(shore.facing)} ({shore.facing:.0f} deg) - "
-            f"{profile.name} - confidence {prediction.confidence * 100:.0f}%"
+            f"beach faces {compass_point(shore.facing)} ({fmt(shore.facing, 0)} deg) - "
+            f"{profile.name} - confidence {fmt(prediction.confidence * 100, 0)}%"
         )
     )
     lines.append("")
@@ -155,7 +156,7 @@ def report(
 def _driver_lines(driver: Driver, style: Style) -> list[str]:
     info = FLAG_INFO[driver.demand]
     bar = _bar(driver.score)
-    head = f"    {style(bar, info.ansi)} {driver.label:<18} {style.dim(f'{driver.score:.0f}/100')}"
+    head = f"    {style(bar, info.ansi)} {driver.label:<18} {style.dim(f'{fmt(driver.score, 0)}/100')}"
     body = _wrap(driver.detail, indent=8)
     return [head, *body]
 
@@ -175,12 +176,12 @@ def _condition_lines(prediction: Prediction, forecast: Forecast, units: Units) -
         direction = compass_point(m.deep_direction) if m.deep_direction is not None else "?"
         rows.append((
             "Swell",
-            f"{units.height(m.deep_height)} at {m.deep_period:.0f} s from {direction}"
-            f" ({m.incidence:+.0f} deg off shore-normal)",
+            f"{units.height(m.deep_height)} at {fmt(m.deep_period, 0)} s from {direction}"
+            f" ({signed(m.incidence, 0)} deg off shore-normal)",
         ))
         rows.append(("Wave power", f"{_kw(m.wave_power)} kW/m of beach"))
         rows.append(("Surf zone", f"about {units.distance(m.surf_zone_width)} wide"))
-        rows.append(("Beach state", f"{m.beach_state} (omega {m.omega:.1f})"))
+        rows.append(("Beach state", f"{m.beach_state} (omega {fmt(m.omega, 1)})"))
     else:
         rows.append(("Surf", "flat"))
 
@@ -209,14 +210,14 @@ def _condition_lines(prediction: Prediction, forecast: Forecast, units: Units) -
         if hour.current_speed is not None and hour.current_speed > 0.05:
             rows.append(("Ocean current", units.speed(hour.current_speed)))
         if hour.uv_index is not None:
-            rows.append(("UV index", f"{hour.uv_index:.0f}"))
+            rows.append(("UV index", f"{fmt(hour.uv_index, 0)}"))
 
     return [f"    {label:<16} {value}" for label, value in rows]
 
 
 def _kw(value: float) -> str:
     """Wave power spans three orders of magnitude; a fixed precision loses the low end."""
-    return f"{value:.1f}" if value < 10 else f"{value:.0f}"
+    return f"{fmt(value, 1)}" if value < 10 else f"{fmt(value, 0)}"
 
 
 def _tide_word(phase: float) -> str:
@@ -260,12 +261,12 @@ def _caveats(
     if peak > swimmer.swim_speed and peak > 0.2:
         article = "An" if swimmer.label[0].lower() in "aeiou" else "A"
         notes.append(
-            f"{article} {swimmer.label} holds about {swimmer.swim_speed:.1f} m/s. Rip pulses here reach "
-            f"{peak:.1f} m/s, so swimming straight back at the beach will not work - go parallel first."
+            f"{article} {swimmer.label} holds about {fmt(swimmer.swim_speed, 1)} m/s. Rip pulses here reach "
+            f"{fmt(peak, 1)} m/s, so swimming straight back at the beach will not work - go parallel first."
         )
     if shore.confidence < 0.55:
         notes.append(
-            f"The shoreline orientation ({shore.facing:.0f} deg) was inferred from terrain and is "
+            f"The shoreline orientation ({fmt(shore.facing, 0)} deg) was inferred from terrain and is "
             "uncertain here - a headland or bay. Pass --facing if you know which way the beach looks."
         )
     if shore.is_sheltered:

@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Beach flag predictor</title>
+<meta name="description" content="Which safety flag a beach is likely flying, from live marine and weather models.">
+<meta name="theme-color" content="#12A150">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Beach Flag">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<div class="wrap">
+  <h1>Beach flag predictor</h1>
+  <div class="sub">Which safety flag the beach is likely flying — now, or any hour you drag to.</div>
+
+  <div class="card">
+    <div class="row">
+      <button class="primary" id="locate">Use my location</button>
+      <input type="search" id="query" placeholder="or search a beach or town"
+             autocomplete="off" enterkeyhint="search">
+      <button id="search">Search</button>
+    </div>
+    <div class="row" style="margin-top:12px">
+      <label class="note">Beach type
+        <select id="beach">
+          <option value="sandy" selected>Sandy, bars and rip channels</option>
+          <option value="dissipative">Wide flat sand</option>
+          <option value="steep">Steep sand or shingle</option>
+          <option value="reef">Reef or rock platform</option>
+          <option value="sheltered">Sheltered bay</option>
+        </select>
+      </label>
+      <label class="note">Swimmer
+        <select id="swimmer">
+          <option value="strong">Strong</option>
+          <option value="average" selected>Average</option>
+          <option value="weak">Weak</option>
+          <option value="child">Child</option>
+          <option value="nonswimmer">Non-swimmer</option>
+        </select>
+      </label>
+    </div>
+    <ul class="results hidden" id="results"></ul>
+    <div class="note" id="status" style="margin-top:10px"></div>
+  </div>
+
+  <div id="out"></div>
+</div>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
